@@ -40,6 +40,7 @@ class OpenAICompatibleLanguageModel(ProfileAwareMixin, OpenAILanguageModel):
 
     base_url: Optional[str] = None
     api_key: Optional[str] = None
+    default_headers: Optional[Dict[str, str]] = None
 
     def __post_init__(self):
         """Initialize OpenAI-compatible configuration."""
@@ -92,6 +93,19 @@ class OpenAICompatibleLanguageModel(ProfileAwareMixin, OpenAILanguageModel):
         if self._profile and not self._profile.supports_response_format:
             self._response_format_unsupported = True
         self._instance_extra_body: Dict[str, Any] = self._config.get("extra_body") or {}
+
+    def _get_headers(self) -> Dict[str, str]:
+        """Get headers for requests, merging caller-supplied default headers.
+
+        ``default_headers`` (from config or a direct attribute) are applied
+        first and then overlaid by the provider-controlled headers so caller
+        data can never replace ``Authorization``, ``Content-Type``, or the
+        organization header. Returns a new mapping; the configured input is
+        never mutated.
+        """
+        headers: Dict[str, str] = dict(self.default_headers or {})
+        headers.update(super()._get_headers())
+        return headers
 
     def _is_likely_lmstudio(self) -> bool:
         """Check if this endpoint is likely LM Studio based on port.
@@ -746,6 +760,12 @@ class OpenAICompatibleLanguageModel(ProfileAwareMixin, OpenAILanguageModel):
             "model": self.get_model_name(),
             "model_kwargs": model_kwargs,
         }
+
+        # Forward caller-supplied default headers only when present so
+        # providers that omit them keep byte-identical LangChain kwargs.
+        default_headers = self.default_headers or {}
+        if default_headers:
+            langchain_kwargs["default_headers"] = dict(default_headers)
 
         # Create new HTTP clients for LangChain with same SSL/timeout/proxy config
         # We create fresh clients instead of sharing ours because when this Esperanto
